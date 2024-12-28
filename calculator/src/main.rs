@@ -1,5 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap};
 use std::io::stdin;
+use std::mem;
 
 fn main() {
     let mut memory = Memory::new();
@@ -80,11 +81,15 @@ fn main() {
         Minus,
         Asterisk,
         Slash,
+        LParen,
+        RParen,
     }
 
     impl Token {
         fn parse(value: &str) -> Self {
             match value {
+                "(" => Self::LParen,
+                ")" => Self::RParen,
                 "+" => Self::Plus,
                 "-" => Self::Minus,
                 "*" => Self::Asterisk,
@@ -128,11 +133,14 @@ fn main() {
     }
 
     fn eval_expression(tokens: &[Token], memory: &Memory) -> f64 {
-        eval_additive(tokens, memory)
+        let (result, index) = eval_additive_expression(tokens, 0, memory);
+        // 正しく計算で切れていればトークン列の最後に到達しているはず
+        assert_eq!(tokens.len(), index);
+        result
     }
 
-    fn eval_additive(tokens: &[Token], memory: &Memory) -> f64 {
-        let mut index = 0;
+    fn eval_additive_expression(tokens: &[Token], index: usize, memory: &Memory) -> (f64, usize) {
+        let mut index = index;
         let mut result;
 
         (result, index) = eval_multiplicative_expression(tokens, index, memory);
@@ -153,7 +161,7 @@ fn main() {
                 _ => break,
             }
         }
-        result
+        (result, index)
     }
 
     fn eval_multiplicative_expression(
@@ -162,23 +170,50 @@ fn main() {
         memory: &Memory,
     ) -> (f64, usize) {
         let mut index = index;
-        let mut result = eval_token(&tokens[index], memory);
-        index += 1;
+        let mut result;
+
+        (result, index) = eval_primary_expression(tokens, index, memory);
 
         while index < tokens.len() {
             match &tokens[index] {
                 Token::Asterisk => {
-                    result *= eval_token(&tokens[index + 1], memory);
-                    index += 2;
+                    let (value, next) = eval_primary_expression(tokens, index + 1, memory);
+                    result *= value;
+                    index = next;
                 }
                 Token::Slash => {
-                    result /= eval_token(&tokens[index + 1], memory);
-                    index += 2;
+                    let (value, next) = eval_primary_expression(tokens, index + 1, memory);
+                    result /= value;
+                    index = next;
                 }
                 _ => break,
             }
         }
         (result, index)
+    }
+
+    fn eval_primary_expression(tokens: &[Token], index: usize, memory: &Memory) -> (f64, usize) {
+        let first_token = &tokens[index];
+
+        match first_token {
+            Token::LParen => {
+                // 開き括弧で始まっているので、括弧内の式を評価
+                let (result, next) = eval_additive_expression(tokens, index + 1, memory);
+                assert_eq!(Token::RParen, tokens[next]);
+
+                (result, next + 1)
+            }
+            Token::Number(value) => {
+                // 数値なのでその値と次の位置を返す
+                (*value, index + 1)
+            }
+            Token::MemoryRef(memory_name) => (memory.get(memory_name), index + 1),
+
+            _ => {
+                // それ以外の場合はエラー
+                unreachable!()
+            }
+        }
     }
 }
 
