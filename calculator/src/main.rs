@@ -1,7 +1,8 @@
+use std::collections::{hash_map::Entry, HashMap};
 use std::io::stdin;
 
 fn main() {
-    let mut memory = Memory { slots: vec![] };
+    let mut memory = Memory::new();
     let mut prev_result: f64 = 0.0;
 
     for line in stdin().lines() {
@@ -11,69 +12,130 @@ fn main() {
             break;
         }
 
-        // 空白で分割
-        let tokens: Vec<&str> = line.split(char::is_whitespace).collect();
+        // トークン列に分割
+        let tokens = Token::split(&line);
 
-        // メモリへの書き込み
-        // if tokens[0] == "mem+" {
-        //     add_and_print_memory(&mut memory, prev_result);
-        //     continue;
-        // } else if tokens[0] == "mem-" {
-        //     add_and_print_memory(&mut memory, -prev_result);
-        //     continue;
-        // }
+        // 式の評価
+        match &tokens[0] {
+            Token::MemoryPlus(memory_name) => {
+                // メモリへの加算
+                let memory_name = memory_name.to_string();
+                let result = memory.add(memory_name, prev_result);
+                print_output(result);
+            }
+            Token::MemoryMinus(memory_name) => {
+                // メモリへの減算
+                let memory_name = memory_name.to_string();
+                let result = memory.add(memory_name, -prev_result);
+                print_output(result);
+            }
+            _ => {
+                // 式の値の計算
+                let left = eval_token(&tokens[0], &memory);
+                let right = eval_token(&tokens[2], &memory);
+                let result = eval_expression(left, &tokens[1], right);
 
-        let is_memory = tokens[0].starts_with("mem");
-        if is_memory && tokens[0].ends_with('+') {
-            add_and_print_memory(&mut memory, tokens[0], prev_result);
-            continue;
-        } else if is_memory && tokens[0].ends_with('-') {
-            add_and_print_memory(&mut memory, tokens[0], -prev_result);
-            continue;
+                print_output(result);
+                prev_result = result;
         }
 
-        // 式の計算
-        let left = eval_token(tokens[0], &memory);
-        let right = eval_token(tokens[2], &memory);
-        let result = eval_expression(left, tokens[1], right);
-
-        print_output(result);
-
-        prev_result = result;
     }
 }
 
 struct Memory {
-    slots: Vec<(String, f64)>,
+    slots: HashMap<String, f64>,
 }
 
-fn print_output(value: f64) {
-    println!("{}", value);
-}
+impl Memory {
+    fn new() -> Self {
+        Self {
+            slots: HashMap::new(),
+        }
+    }
 
-fn eval_token(token: &str, memory: &Memory) -> f64 {
-    if token.starts_with("mem") {
-        let slot_name = &token[3..];
-        // 全てのメモリを探索 (slot.0 が名前(String), slot.1 が値(f64))
-        for slot in &memory.slots {
-            if slot.0 == slot_name {
-                // メモリが見つかったので値を返して終了
-                return slot.1;
+    fn add(&mut self, slot_name: String, prev_result: f64) {
+        match self.slots.entry(slot_name) {
+            Entry::Occupied(mut entry) => {
+                // メモリが見つかったので値を更新
+                *entry.get_mut() += prev_result;
+                *entry.get();
+            }
+            Entry::Vacant(entry) => {
+                // メモリが見つからないので要素追加
+                entry.insert(prev_result);
+                prev_result;
             }
         }
-        // メモリが見つからなかったので初期値を返す
-        0.0
-    } else {
-        token.parse().unwrap()
+    }
+
+    fn get(&self, slot_name: &str) -> f64 {
+        self.slots.get(slot_name).copied().unwrap_or(0.0)
     }
 }
 
-fn eval_expression(left: f64, operator: &str, right: f64) -> f64 {
+#[derive(Debug, PartialEq)]
+enum Token {
+    Number(f64),
+    MemoryRef(String),
+    MemoryPlus(String),
+    MemoryMinus(String),
+    Plus,
+    Minus,
+    Asterisk,
+    Slash,
+}
+
+impl Token {
+    fn parse(value: &str) -> Self {
+        match value {
+            "+" => Self::Plus,
+            "-" => Self::Minus,
+            "*" => Self::Asterisk,
+            "/" => Self::Slash,
+            _ if value.starts_with("mem") => {
+                let mut memory_name = value[3..].to_string();
+                if value.ends_with('+') {
+                    memory_name.pop();
+                    Self::MemoryPlus(memory_name)
+                } else if value.ends_with('-') {
+                    memory_name.pop();
+                    Self::MemoryMinus(memory_name)
+                } else {
+                    Self::MemoryRef(memory_name)
+                }
+            }
+            _ => Self::Number(value.parse().unwrap()),
+        }
+    }
+
+    fn split(text: &str) -> Vec<Self> {
+        text.split(char::is_whitespace).map(Self::parse).collect()
+    }
+}
+
+fn eval_token(token: &Token, memory: &Memory) -> f64 {
+    match token {
+        Token::Number(value) => {
+            // 数値の場合はそのまま返す
+            *value
+        }
+        Token::MemeryRef(memory_name) => {
+            // メモリ参照の場合はメモリから値を取得
+            memory.get(memory_name)
+        }
+        _ => {
+            // それ以外の場合はエラー
+            unreachable!()
+        }
+    }
+}
+
+fn eval_expression(left: f64, operator: &Token, right: f64) -> f64 {
     match operator {
-        "+" => left + right,
-        "-" => left - right,
-        "*" => left * right,
-        "/" => left / right,
+        Token::Plus => left + right,
+        Token::Minus => left - right,
+        Token::Asterisk => left * right,
+        Token::Slash => left / right,
         _ =>
         // 入力が正しいならここには来ない
         {
@@ -82,19 +144,6 @@ fn eval_expression(left: f64, operator: &str, right: f64) -> f64 {
     }
 }
 
-fn add_and_print_memory(memory: &mut Memory, token: &str, prev_result: f64) {
-    let slot_name = &token[3..token.len() - 1];
-
-    for slot in memory.slots.iter_mut() {
-        if slot.0 == slot_name {
-            // メモリが見つかったので、値を更新・表示して終了
-            slot.1 += prev_result;
-            print_output(slot.1);
-            return;
-        }
-    }
-
-    // メモリが見つからなかったので最後の要素に追加する
-    memory.slots.push((slot_name.to_string(), prev_result));
-    print_output(prev_result);
+fn print_output(value: f64) {
+    println!("{}", value);
 }
